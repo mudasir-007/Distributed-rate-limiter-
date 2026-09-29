@@ -1,0 +1,42 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Reproducible benchmark snapshot
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install vcpkg
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/vcpkg/vcpkg" install --triplet x64-linux
+
+      - name: Configure
+        run: cmake --preset linux-release
+
+      - name: Build benchmarks
+        run: cmake --build --preset linux-release --target bench bench_contention
+
+      - name: Run benchmark suite
+        run: |
+          ./build/bench 4 10000 100 build/benchmark_results.csv
+          ./build/bench_contention 4 200 1000 250
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: build/benchmark_results.csv
