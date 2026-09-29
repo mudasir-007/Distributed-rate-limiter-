@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux - build, tests, demo
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install vcpkg
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Install C++ dependencies
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/vcpkg/vcpkg" install --triplet x64-linux
+
+      - name: Configure
+        run: cmake --preset linux-release
+
+      - name: Build
+        run: cmake --build --preset linux-release
+
+      - name: Run tests
+        run: ctest --preset linux-release
+
+      - name: Run concurrency demo
+        env:
+          REDIS_URL: tcp://127.0.0.1:6379
+        run: ./build/concurrency_demo
+
+      - name: Run benchmark smoke test
+        run: ./build/bench 4 1000 100
+
+  windows:
+    name: Windows - MSVC build and local tests
+    runs-on: windows-2025-vs2026
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install project dependencies
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_ROOT -and $env:VCPKG_INSTALLATION_ROOT) {
+            $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          }
+          if (-not $env:VCPKG_ROOT) {
+            throw "Neither VCPKG_ROOT nor VCPKG_INSTALLATION_ROOT is available."
+          }
+          "VCPKG_ROOT=$env:VCPKG_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows
+
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset windows-release
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build --preset windows-release --parallel
+
+      - name: Run non-Redis unit tests
+        shell: pwsh
+        run: |
+          ctest --preset windows-release -R "TokenBucket|ShardedRateLimiter" --output-on-failure
+
+  tsan:
+    name: Linux - ThreadSanitizer
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang and vcpkg
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        shell: bash
+        run: "$RUNNER_TEMP/vcpkg/vcpkg install --triplet x64-linux"
+
+      - name: Configure with ThreadSanitizer
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-tsan -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DUSE_TSAN=ON \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build-tsan
+
+      - name: Run tests under ThreadSanitizer
+        working-directory: build-tsan
+        run: ctest --output-on-failure
