@@ -1,0 +1,8 @@
+{
+  "name": "distributed-rate-limiter",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "hiredis",
+    "redis-plus-plus"
+  ]
+}
