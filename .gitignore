@@ -1,0 +1,37 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+out/
+
+# CMake / compiler artifacts
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+
+# IDEs
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Runtime / local files
+.env
+*.log
+benchmark_results.csv
+
+# Other local project files
+0md_files_for_reading/
+
+vcpkg_installed/
+build/
+.cache/
